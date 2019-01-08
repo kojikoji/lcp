@@ -41,3 +41,51 @@ class Decider:
         eps = self.eps_vec[t]
         acceptance = np.linalg.norm(self.v - v) < eps
         return(acceptance)
+
+
+class SampleRegister:
+    """
+    This class manage sampled parameters and weight for each of them.
+    """
+    def __init__(self, prior, transition):
+        """
+        Set prior function and transition function of parameters.
+        Initialize vector of new_theta and new_w
+        """
+        self.prior = prior
+        self.transition = transition
+        self.new_w_vec = np.array([])
+        self.new_theta_vec = np.array([])
+
+    def register_new(self, new_theta, t):
+        """
+        Register a new parameter.
+        Simultaneously it calculate weight for the new parameter,
+        and register it.
+        """
+        self.new_theta_vec = np.append(self.new_theta_vec, new_theta)
+        if t > 0:
+            w = self.prior(new_theta)/np.sum(
+                [w * self.transition(theta, new_theta)
+                 for theta, w in zip(self.theta_vec, self.w_vec)])
+        else:
+            w = 1
+        self.new_w_vec = np.append(self.new_w_vec, w)
+
+    def load_new(self):
+        """
+        Refresh theta_vec and w_vec
+        """
+        self.theta_vec = self.new_theta_vec
+        self.new_theta_vec = np.array([])
+        self.w_vec = self.new_w_vec
+        self.new_w_vec = np.array([])
+
+    def choice(self):
+        """
+        Randomly choose parameters based on weight
+        """
+        return(
+            np.random.choice(
+                self.theta_vec,
+                size=1, p=self.w_vec/np.sum(self.w_vec)))
