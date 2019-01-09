@@ -1,10 +1,13 @@
-from lcp import DataManager, Decider, SampleRegister, PriorSampler, SequentialSampler
+from lcp import DataManager, Decider, SampleRegister
+from lcp import PriorSampler, SequentialSampler, Simulator
+from lcp import chart2polar3d, get_random_dev_vec
 import pandas as pd
+import math
 from numpy.testing import assert_array_equal
 from numpy.testing import assert_array_almost_equal
 import numpy as np
 from unittest.mock import MagicMock
-
+import pytest
 
 class TestDataManager(object):
     def test_set_time(self):
@@ -143,3 +146,18 @@ class TestSequentialSampler(object):
         transition_prob = ss.calc_transition_prob(pre_theta, theta)
         assert transition_prob > 0
         assert transition_prob < 1
+
+
+def test_chart2polar3d():
+    x = np.array([1, 1, 0])
+    polar = chart2polar3d(x)
+    assert polar[0] == math.sqrt(2)
+    assert polar[1] == math.pi/2
+    assert polar[1] == math.pi/2
+
+
+def test_get_random_dev_vec():
+    x = np.array([1, 2, 3])
+    random_dev_vec = get_random_dev_vec(x, np.pi/3)
+    cos = np.dot(x, random_dev_vec)/(np.linalg.norm(x)*np.linalg.norm(random_dev_vec))
+    assert cos == pytest.approx(np.cos(np.pi/3))
