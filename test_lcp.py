@@ -161,3 +161,59 @@ def test_get_random_dev_vec():
     random_dev_vec = get_random_dev_vec(x, np.pi/3)
     cos = np.dot(x, random_dev_vec)/(np.linalg.norm(x)*np.linalg.norm(random_dev_vec))
     assert cos == pytest.approx(np.cos(np.pi/3))
+
+
+theta = {
+    "re": {
+        "mean": 1,
+        "local": np.arange(2)
+    },
+    "dr0": {
+        "mean": 1,
+        "local": np.arange(2)
+    },
+    "eta": {
+        "mean": 1,
+        "local": np.arange(2)
+    },
+    "v0": {
+        "mean": 1,
+        "local": np.arange(2)
+    },
+    "fa": {
+        "mean": 1,
+        "local": np.arange(2)
+    },
+    "fr": {
+        "mean": 1,
+        "local": np.arange(2)
+    }
+}
+x = np.array([[0, 0, 1],
+              [0, 0, 0]])
+pre_v = np.arange(6).reshape((2, 3))
+cell_num = 2
+sim = Simulator(x, pre_v)
+
+
+class TestSimulator(object):
+    def test_get_neighbor(self):
+        n = sim.get_neighbor(0, theta)
+        assert_array_equal(n, np.array([1]))
+
+    def test_get_action(self):
+        n = sim.get_neighbor(0, theta)[0]
+        outer_f = sim.get_action(0, n, theta)
+        assert outer_f.shape == (3,)
+
+    def test_get_self_v(self):
+        self_v = sim.get_self_v(0, theta)
+        assert self_v.shape == (3,)
+
+    def test_conduct_each(self):
+        est_v = sim.conduct_each_cell(0, theta)
+        assert est_v.shape == (3,)
+
+    def test_conduct(self):
+        est_v = sim.conduct(theta)
+        assert est_v.shape == (2, 3)

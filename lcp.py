@@ -236,23 +236,28 @@ class Simulator:
     """
     This class conduct simulation
     """
-    def conduct(self, theta, pre_v):
+    def __init__(self, x, pre_v):
+        self.x = x
+        self.pre_v = pre_v
+        self.cell_num = x.shape[0]
+
+    def conduct(self, theta):
         """
         Conduct simulation for all cell
         This return (cell_num, 3) matrix which represents
         estimated velocity of all cells
         """
-        est_v = np.stack([self.conduct_each_cell(cell, theta, pre_v)
+        est_v = np.stack([self.conduct_each_cell(cell, theta)
                           for cell in range(self.cell_num)])
         return(est_v)
 
-    def conduct_each_cell(self, cell, theta, pre_v):
+    def conduct_each_cell(self, cell, theta):
         """
         Conduct simulation for each cell
         This return (3) array which represents
         estimated velocity of one cell
         """
-        self_v = self.get_self_v(cell, theta, pre_v)
+        self_v = self.get_self_v(cell, theta)
         neighbor_vec = self.get_neighbor(cell, theta)
         outer_f = np.zeros(3)
         for neighbor in neighbor_vec:
@@ -260,14 +265,14 @@ class Simulator:
         est_each_v = self_v + outer_f
         return(est_each_v)
 
-    def get_self_v(self, cell, theta, pre_v):
+    def get_self_v(self, cell, theta):
         """
         Calculate self propelled speed
         """
         v0 = theta["v0"]["local"][cell]
         eta = theta["eta"]["local"][cell]
         xi = np.random.uniform(-eta*math.pi, eta*math.pi)
-        base_direction = pre_v[cell]/np.linalg.norm(pre_v[cell])
+        base_direction = self.pre_v[cell]/np.linalg.norm(self.pre_v[cell])
         direction = get_random_dev_vec(base_direction, xi)
         self_v = v0 * direction
         return(self_v)
@@ -277,6 +282,7 @@ class Simulator:
         Calculate action from neighbor
         """
         re_cell = theta["re"]["local"][cell]
+        print(neighbor)
         re_neighbor = theta["re"]["local"][neighbor]
         dr0_cell = theta["dr0"]["local"][cell]
         dr0_neighbor = theta["dr0"]["local"][neighbor]
@@ -308,6 +314,6 @@ class Simulator:
             dr0_i = theta["dr0"]["local"][i]
             r0_i = re_i + dr0_i
             dist_cell_i = np.linalg.norm(x_cell - x_i)
-            if dist_cell_i < r0_cell + r0_i:
+            if dist_cell_i < r0_cell + r0_i and i != cell:
                 neighbor_vec = np.append(neighbor_vec, i)
-        return(neighbor_vec)
+        return(neighbor_vec.astype(int))
