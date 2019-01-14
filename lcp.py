@@ -45,12 +45,14 @@ class Decider:
     This class calculate difference between simulation and real data,
     and decide whether simulation results is acceptable.
     """
-    def __init__(self, length, v, min_eps=1.0e-4, order=1):
+    def __init__(self, length, v, max_eps=0.05, order=1):
         """
         Initialize epx vec, which represents accetance threshold for each round
         Aquire the real data velocity used in evaluation
         Waring:: Eps vec should be considered later
         """
+        min_eps = max_eps/(length**order)
+        self.length = length
         self.eps_vec = min_eps * np.arange(length, 1)**order
         self.v = v
 
@@ -61,6 +63,9 @@ class Decider:
         eps = self.eps_vec[t]
         acceptance = np.linalg.norm(self.v - v) < eps
         return(acceptance)
+
+    def get_length(self):
+        return(self.length)
 
 
 class SampleRegister:
@@ -184,7 +189,7 @@ class SequentialSampler(PriorSampler):
             # mean parameter sampled from previous mean
             theta[theta_key]["mean"] = np.abs(np.random.normal(
                 pre_theta[theta_key]["mean"],
-                self.var_dict[theta_key],
+                np.sqrt(self.var_dict[theta_key]),
                 size=1)[0])
             # local parameters sampled from previous local
             theta[theta_key]["local"] = np.abs(np.random.multivariate_normal(
@@ -316,7 +321,10 @@ class Simulator:
         r_cell = self.x[cell]
         r_neighbor = self.x[neighbor]
         dist_neighbor_cell = np.linalg.norm(r_cell - r_neighbor)
-        direction_neighbor_cell = (r_cell - r_neighbor)/dist_neighbor_cell
+        if dist_neighbor_cell > 0.1:
+            direction_neighbor_cell = (r_cell - r_neighbor)/dist_neighbor_cell
+        else:
+            direction_neighbor_cell = np.zeros(r_cell.shape)
         fa = theta["fa"]["local"][cell]
         fr = theta["fr"]["local"][cell]
         Re = re_cell + re_neighbor
@@ -325,6 +333,8 @@ class Simulator:
             outer_f = direction_neighbor_cell*fr*(Re - dist_neighbor_cell)/Re
         else:
             outer_f = direction_neighbor_cell*fa*(Re - dist_neighbor_cell)/(dR0)
+        if dist_neighbor_cell < 0.1:
+            outer_f = np.zeros(r_cell.shape)
         return(outer_f)
 
     def get_neighbor(self, cell, theta):
@@ -347,9 +357,9 @@ class Simulator:
 
 
 class LcpMain:
-    def main(self, dm, dc, sr, ps, ss, sim, length, sample_num):
+    def main(self, dm, dc, sr, ps, ss, sim, sample_num):
         theta = {}
-        for t in range(length):
+        for t in range(dc.get_length()):
             sr.load_new()
             pre_theta = theta
             while sr.get_new_num() < sample_num:
