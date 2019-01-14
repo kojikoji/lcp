@@ -3,6 +3,8 @@ import numpy as np
 from scipy import stats
 import math
 from scipy.ndimage import rotate
+from scipy.spatial.distance import pdist, squareform
+
 
 class DataManager:
     """
@@ -14,8 +16,28 @@ class DataManager:
 
     def set_time(self, t):
         selected_df = self.df.loc[self.df.t == t]
-        self.r = selected_df[["x", "y", "z"]].values
-        self.v = selected_df[["vx", "vy", "vz"]].values
+        pre_column_dict = {
+            "vx": "pvx",
+            "vy": "pvy",
+            "vz": "pvz"
+        }
+        pre_df = self.df.loc[self.df.t == (t-1)].rename(
+            pre_column_dict,
+            axis=1)[["pvx", "pvy", "pvz", "track"]]
+        merged_df = selected_df.merge(pre_df, on='track')
+        self.r = merged_df[["x", "y", "z"]].values
+        self.v = merged_df[["vx", "vy", "vz"]].values
+        self.pre_v = merged_df[["pvx", "pvy", "pvz"]].values
+        self.dist_mat = squareform(pdist(self.r))
+
+    def get_v(self):
+        return(self.v)
+
+    def get_r(self):
+        return(self.r)
+
+    def get_pre_v(self):
+        return(self.pre_v)
 
 
 class Decider:
@@ -23,7 +45,7 @@ class Decider:
     This class calculate difference between simulation and real data,
     and decide whether simulation results is acceptable.
     """
-    def __init__(self, length, v, min_eps=1.0e-4, order=2):
+    def __init__(self, length, v, min_eps=1.0e-4, order=1):
         """
         Initialize epx vec, which represents accetance threshold for each round
         Aquire the real data velocity used in evaluation
@@ -54,6 +76,7 @@ class SampleRegister:
         self.transition = transition
         self.new_w_vec = np.array([])
         self.new_theta_vec = np.array([])
+        self.new_num = 0
 
     def register_new(self, new_theta, t):
         """
@@ -69,6 +92,7 @@ class SampleRegister:
         else:
             w = 1
         self.new_w_vec = np.append(self.new_w_vec, w)
+        self.new_num = self.new_w_vec.shape[0]
 
     def load_new(self):
         """
@@ -78,6 +102,7 @@ class SampleRegister:
         self.new_theta_vec = np.array([])
         self.w_vec = self.new_w_vec
         self.new_w_vec = np.array([])
+        self.new_num = 0
 
     def choice(self):
         """
@@ -87,6 +112,9 @@ class SampleRegister:
             np.random.choice(
                 self.theta_vec,
                 size=1, p=self.w_vec/np.sum(self.w_vec))[0])
+
+    def get_new_num(self):
+        return(self.new_num)
 
 
 class PriorSampler:
@@ -115,9 +143,9 @@ class PriorSampler:
                 self.boundary_dict[theta_key][1],
                 size=1)[0]
             # loca parameters sampled from mean
-            theta[theta_key]["local"] = np.random.multivariate_normal(
+            theta[theta_key]["local"] = np.abs(np.random.multivariate_normal(
                 theta[theta_key]["mean"] * self.point_num_vec,
-                self.K_dict[theta_key])
+                self.K_dict[theta_key]))
         return(theta)
 
     def calc_prior_prob(self, theta):
@@ -154,14 +182,14 @@ class SequentialSampler(PriorSampler):
         for theta_key in self.theta_key_vec:
             theta[theta_key] = {}
             # mean parameter sampled from previous mean
-            theta[theta_key]["mean"] = np.random.normal(
+            theta[theta_key]["mean"] = np.abs(np.random.normal(
                 pre_theta[theta_key]["mean"],
                 self.var_dict[theta_key],
-                size=1)[0]
+                size=1)[0])
             # local parameters sampled from previous local
-            theta[theta_key]["local"] = np.random.multivariate_normal(
+            theta[theta_key]["local"] = np.abs(np.random.multivariate_normal(
                 pre_theta[theta_key]["local"],
-                self.K_dict[theta_key])
+                self.K_dict[theta_key]))
         return(theta)
 
     def calc_transition_prob(self, pre_theta, theta):
@@ -282,7 +310,6 @@ class Simulator:
         Calculate action from neighbor
         """
         re_cell = theta["re"]["local"][cell]
-        print(neighbor)
         re_neighbor = theta["re"]["local"][neighbor]
         dr0_cell = theta["dr0"]["local"][cell]
         dr0_neighbor = theta["dr0"]["local"][neighbor]
@@ -317,3 +344,21 @@ class Simulator:
             if dist_cell_i < r0_cell + r0_i and i != cell:
                 neighbor_vec = np.append(neighbor_vec, i)
         return(neighbor_vec.astype(int))
+
+
+class LcpMain:
+    def main(self, dm, dc, sr, ps, ss, sim, length, sample_num):
+        theta = {}
+        for t in range(length):
+            sr.load_new()
+            pre_theta = theta
+            while sr.get_new_num() < sample_num:
+                if t == 0:
+                    theta = ps.sample_param()
+                else:
+                    theta = ss.sample_param(pre_theta)
+                v = sim.conduct(theta)
+                if dc.decide(v, t):
+                    sr.register_new(theta)
+            pre_theta = theta
+        return(sr)

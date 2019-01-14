@@ -19,13 +19,17 @@ class TestDataManager(object):
              "x": [1, 2],
              "y": [1, 2],
              "z": [1, 2],
+             "track": [1, 1],
              "t": [1, 2]})
-        dm.set_time(1)
+        dm.set_time(2)
         assert_array_equal(
             dm.r,
-            np.array([[1, 1, 1]]))
+            np.array([[2, 2, 2]]))
         assert_array_equal(
             dm.v,
+            np.array([[2, 2, 2]]))
+        assert_array_equal(
+            dm.pre_v,
             np.array([[3, 3, 3]]))
 
 
