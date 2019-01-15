@@ -23,10 +23,10 @@ def norm_vec3(v, axis=1):
 
 
 @numba.jit(nopython=True)
-def multivariate_normal_pdf(x, mu, L):
+def multivariate_normal_pdf(x, mu, L, detL):
     diff2 = (x - mu)**2
-    dLd = diff2.reshape((1, diff2.shape[0])) @ L @ diff2
-    Z = np.linalg(L)/math.power(math.pi, diff2.shape[0]/2)
+    dLd = np.dot(diff2, L @ diff2)
+    Z = detL / np.power(2*math.pi, diff2.shape[0]/2)
     prob = Z*math.exp(-dLd)
     return(prob)
 
@@ -151,10 +151,11 @@ class PriorSampler:
     """
     Sample parameters from prior distribution
     """
-    def __init__(self, theta_key_vec, boundary_dict, K_dict):
+    def __init__(self, theta_key_vec, boundary_dict, K_dict, L_base):
         self.theta_key_vec = theta_key_vec
         self.boundary_dict = boundary_dict
         self.K_dict = K_dict
+        self.L_base = L_base
         point_num = K_dict[theta_key_vec[0]].shape[0]
         self.point_num_vec = np.full(point_num, 1.0)
 
@@ -186,10 +187,11 @@ class PriorSampler:
         for theta_key in self.theta_key_vec:
             interval = self.boundary_dict[theta_key][1] - self.boundary_dict[theta_key][0]
             mean_prob = 1.0/interval
-            local_prob = stats.multivariate_normal.pdf(
+            L = self.L_base/((0.1*theta[theta_key]["mean"])**2)
+            local_prob = multivariate_normal_pdf(
                 theta[theta_key]["local"],
-                mean=theta[theta_key]["mean"] * self.point_num_vec,
-                cov=((0.1*theta[theta_key]["mean"])**2)*self.K_dict[theta_key])
+                theta[theta_key]["mean"] * self.point_num_vec,
+                L, np.linalg.det(L))
             prob *= mean_prob * local_prob
         return(prob)
 
@@ -198,10 +200,11 @@ class SequentialSampler(PriorSampler):
     """
     Parameter sampling based on previous parameter
     """
-    def __init__(self, theta_key_vec, var_dict, K_dict):
+    def __init__(self, theta_key_vec, var_dict, K_dict, L_base):
         self.theta_key_vec = theta_key_vec
         self.var_dict = var_dict
         self.K_dict = K_dict
+        self.L_base = L_base
         point_num = K_dict[theta_key_vec[0]].shape[0]
         self.point_num_vec = np.full(point_num, 1.0)
 
@@ -237,10 +240,11 @@ class SequentialSampler(PriorSampler):
                 scale=pre_theta[theta_key]["mean"]*0.1)
             # local parameters sampled from previous local
             diff_mean = theta[theta_key]["mean"] - pre_theta[theta_key]["mean"]
-            local_prob = stats.multivariate_normal(
+            L = self.L_base/((0.1*pre_theta[theta_key]["mean"])**2)
+            local_prob = multivariate_normal_pdf(
+                theta[theta_key]["local"],
                 pre_theta[theta_key]["local"] + diff_mean,
-                ((0.1*pre_theta[theta_key]["mean"])**2)*self.K_dict[theta_key]).pdf(
-                    theta[theta_key]["local"])
+                L, np.linalg.det(L))
             prob *= mean_prob * local_prob
         return(prob)
 
@@ -294,14 +298,23 @@ def get_random_dev_vec(x, dev_angle):
     return(random_dev_vec)
 
 
+def get_maximum_neghbor(x, r_max):
+    neighbor_list = [
+        [j for j in range(x.shape[0])
+         if norm_vec3(x[i, :] - x[j, :]) < r_max and i != j]
+        for i in range(x.shape[0])]
+    return(neighbor_list)
+
+
 class Simulator:
     """
     This class conduct simulation
     """
-    def __init__(self, x, pre_v):
+    def __init__(self, x, pre_v, max_r=30):
         self.x = x
         self.pre_v = pre_v
         self.cell_num = x.shape[0]
+        self.maximum_neghbor = get_maximum_neghbor(x, max_r)
 
     def conduct(self, theta):
         """
@@ -375,7 +388,8 @@ class Simulator:
         dr0_cell = theta["dr0"]["local"][cell]
         r0_cell = re_cell + dr0_cell
         neighbor_vec = np.array([])
-        for i, x_i in enumerate(self.x):
+        for i in self.maximum_neghbor[cell]:
+            x_i = self.x[i]
             re_i = theta["re"]["local"][i]
             dr0_i = theta["dr0"]["local"][i]
             r0_i = re_i + dr0_i

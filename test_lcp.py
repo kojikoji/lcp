@@ -37,8 +37,8 @@ class TestDecider(object):
     def test_decide(self):
         dc = Decider(10, 1)
         dc.eps_vec = np.array([3, 2, 1])
-        dc.v = np.array([0, 0])
-        v1 = np.array([1.5, 0])
+        dc.v = np.array([[0, 0, 0]])
+        v1 = np.array([[1.5, 0, 0]])
         accept0 = dc.decide(v1, 0)
         accept2 = dc.decide(v1, 2)
         assert accept0
@@ -75,7 +75,7 @@ class TestPriorSampler(object):
             "a": np.array([[1, 0], [0, 1]]),
             "b": np.array([[1, 0], [0, 1]])
         }
-        ps = PriorSampler(theta_key_vec, boundary_dict, K_dict)
+        ps = PriorSampler(theta_key_vec, boundary_dict, K_dict, K_dict["a"])
         theta = ps.sample_param()
         assert theta.keys() == boundary_dict.keys()
         assert theta["a"]["local"].shape == (2,)
@@ -92,11 +92,10 @@ class TestPriorSampler(object):
             "a": np.array([[1, 0], [0, 1]]),
             "b": np.array([[1, 0], [0, 1]])
         }
-        ps = PriorSampler(theta_key_vec, boundary_dict, K_dict)
+        ps = PriorSampler(theta_key_vec, boundary_dict, K_dict, K_dict["a"])
         theta = ps.sample_param()
         prior_prob = ps.calc_prior_prob(theta)
         assert prior_prob > 0
-        assert prior_prob < 1
 
 
 class TestSequentialSampler(object):
@@ -120,7 +119,7 @@ class TestSequentialSampler(object):
                 "local": np.array([0, 1])
             }
         }
-        ss = SequentialSampler(theta_key_vec, var_dict, K_dict)
+        ss = SequentialSampler(theta_key_vec, var_dict, K_dict, K_dict["a"])
         theta = ss.sample_param(pre_theta)
         assert theta.keys() == var_dict.keys()
         assert theta["a"]["local"].shape == (2,)
@@ -145,11 +144,10 @@ class TestSequentialSampler(object):
                 "local": np.array([0, 1])
             }
         }
-        ss = SequentialSampler(theta_key_vec, var_dict, K_dict)
+        ss = SequentialSampler(theta_key_vec, var_dict, K_dict, K_dict["a"])
         theta = ss.sample_param(pre_theta)
         transition_prob = ss.calc_transition_prob(pre_theta, theta)
         assert transition_prob > 0
-        assert transition_prob < 1
 
 
 def test_chart2polar3d():
