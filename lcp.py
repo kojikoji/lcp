@@ -4,6 +4,31 @@ from scipy import stats
 import math
 from scipy.ndimage import rotate
 from scipy.spatial.distance import pdist, squareform
+import numba
+
+
+@numba.jit(nopython=True)
+def norm_mat(v_mat, axis=1):
+    return(np.sqrt(v_mat[:, 0]**2 + v_mat[:, 1]**2 + v_mat[:, 2]**2))
+
+
+@numba.jit(nopython=True)
+def norm_vec2(v, axis=1):
+    return(np.sqrt(v[0]**2 + v[1]**2))
+
+
+@numba.jit(nopython=True)
+def norm_vec3(v, axis=1):
+    return(np.sqrt(v[0]**2 + v[1]**2 + v[2]**2))
+
+
+@numba.jit(nopython=True)
+def multivariate_normal_pdf(x, mu, L):
+    diff2 = (x - mu)**2
+    dLd = diff2.reshape((1, diff2.shape[0])) @ L @ diff2
+    Z = np.linalg(L)/math.power(math.pi, diff2.shape[0]/2)
+    prob = Z*math.exp(-dLd)
+    return(prob)
 
 
 class DataManager:
@@ -24,7 +49,8 @@ class DataManager:
         pre_df = self.df.loc[self.df.t == (t-1)].rename(
             pre_column_dict,
             axis=1)[["pvx", "pvy", "pvz", "track"]]
-        merged_df = selected_df.merge(pre_df, on='track')
+        merged_df = selected_df.merge(pre_df, on='track').drop_duplicates(
+            ["x", "y", "z"])
         self.r = merged_df[["x", "y", "z"]].values
         self.v = merged_df[["vx", "vy", "vz"]].values
         self.pre_v = merged_df[["pvx", "pvy", "pvz"]].values
@@ -45,15 +71,14 @@ class Decider:
     This class calculate difference between simulation and real data,
     and decide whether simulation results is acceptable.
     """
-    def __init__(self, length, v, max_eps=0.05, order=1):
+    def __init__(self, length, v, max_eps=0.1, rate=0.9):
         """
         Initialize epx vec, which represents accetance threshold for each round
         Aquire the real data velocity used in evaluation
         Waring:: Eps vec should be considered later
         """
-        min_eps = max_eps/(length**order)
         self.length = length
-        self.eps_vec = min_eps * np.arange(length, 1)**order
+        self.eps_vec = max_eps * np.power(rate, np.arange(length))
         self.v = v
 
     def decide(self, v, t):
@@ -61,7 +86,7 @@ class Decider:
         Decide accetance
         """
         eps = self.eps_vec[t]
-        acceptance = np.linalg.norm(self.v - v) < eps
+        acceptance = np.mean(norm_mat(self.v - v, axis=1)) < eps
         return(acceptance)
 
     def get_length(self):
@@ -150,7 +175,7 @@ class PriorSampler:
             # loca parameters sampled from mean
             theta[theta_key]["local"] = np.abs(np.random.multivariate_normal(
                 theta[theta_key]["mean"] * self.point_num_vec,
-                self.K_dict[theta_key]))
+                ((0.1*theta[theta_key]["mean"])**2)*self.K_dict[theta_key]))
         return(theta)
 
     def calc_prior_prob(self, theta):
@@ -161,9 +186,10 @@ class PriorSampler:
         for theta_key in self.theta_key_vec:
             interval = self.boundary_dict[theta_key][1] - self.boundary_dict[theta_key][0]
             mean_prob = 1.0/interval
-            local_prob = stats.multivariate_normal(
-                theta[theta_key]["mean"] * self.point_num_vec,
-                self.K_dict[theta_key]).pdf(theta[theta_key]["local"])
+            local_prob = stats.multivariate_normal.pdf(
+                theta[theta_key]["local"],
+                mean=theta[theta_key]["mean"] * self.point_num_vec,
+                cov=((0.1*theta[theta_key]["mean"])**2)*self.K_dict[theta_key])
             prob *= mean_prob * local_prob
         return(prob)
 
@@ -189,12 +215,13 @@ class SequentialSampler(PriorSampler):
             # mean parameter sampled from previous mean
             theta[theta_key]["mean"] = np.abs(np.random.normal(
                 pre_theta[theta_key]["mean"],
-                np.sqrt(self.var_dict[theta_key]),
+                pre_theta[theta_key]["mean"]*0.1,
                 size=1)[0])
             # local parameters sampled from previous local
+            diff_mean = theta[theta_key]["mean"] - pre_theta[theta_key]["mean"]
             theta[theta_key]["local"] = np.abs(np.random.multivariate_normal(
-                pre_theta[theta_key]["local"],
-                self.K_dict[theta_key]))
+                pre_theta[theta_key]["local"] + diff_mean,
+                ((0.1*pre_theta[theta_key]["mean"])**2)*self.K_dict[theta_key]))
         return(theta)
 
     def calc_transition_prob(self, pre_theta, theta):
@@ -207,11 +234,13 @@ class SequentialSampler(PriorSampler):
             mean_prob = stats.norm.pdf(
                 theta[theta_key]["mean"],
                 loc=pre_theta[theta_key]["mean"],
-                scale=math.sqrt(self.var_dict[theta_key]))
+                scale=pre_theta[theta_key]["mean"]*0.1)
             # local parameters sampled from previous local
+            diff_mean = theta[theta_key]["mean"] - pre_theta[theta_key]["mean"]
             local_prob = stats.multivariate_normal(
-                pre_theta[theta_key]["local"],
-                self.K_dict[theta_key]).pdf(theta[theta_key]["local"])
+                pre_theta[theta_key]["local"] + diff_mean,
+                ((0.1*pre_theta[theta_key]["mean"])**2)*self.K_dict[theta_key]).pdf(
+                    theta[theta_key]["local"])
             prob *= mean_prob * local_prob
         return(prob)
 
@@ -220,13 +249,13 @@ def chart2polar3d(x):
     """
     Convert chart coordinate to polar coordinate
     """
-    r = np.linalg.norm(x)
+    r = norm_vec3(x)
     if r == 0:
         theta = 0
         phi = 0
     else:
         theta = math.acos(x[2]/r)
-        rxy = np.linalg.norm(x[:2])
+        rxy = norm_vec2(x[:2])
         phi = np.sign(x[1]) * math.acos(x[0]/rxy)
     polar = np.array([r, theta, phi])
     return(polar)
@@ -305,7 +334,7 @@ class Simulator:
         v0 = theta["v0"]["local"][cell]
         eta = theta["eta"]["local"][cell]
         xi = np.random.uniform(-eta*math.pi, eta*math.pi)
-        base_direction = self.pre_v[cell]/np.linalg.norm(self.pre_v[cell])
+        base_direction = self.pre_v[cell]/norm_vec3(self.pre_v[cell])
         direction = get_random_dev_vec(base_direction, xi)
         self_v = v0 * direction
         return(self_v)
@@ -320,7 +349,7 @@ class Simulator:
         dr0_neighbor = theta["dr0"]["local"][neighbor]
         r_cell = self.x[cell]
         r_neighbor = self.x[neighbor]
-        dist_neighbor_cell = np.linalg.norm(r_cell - r_neighbor)
+        dist_neighbor_cell = norm_vec3(r_cell - r_neighbor)
         if dist_neighbor_cell > 0.1:
             direction_neighbor_cell = (r_cell - r_neighbor)/dist_neighbor_cell
         else:
@@ -350,25 +379,31 @@ class Simulator:
             re_i = theta["re"]["local"][i]
             dr0_i = theta["dr0"]["local"][i]
             r0_i = re_i + dr0_i
-            dist_cell_i = np.linalg.norm(x_cell - x_i)
+            dist_cell_i = norm_vec3(x_cell - x_i)
             if dist_cell_i < r0_cell + r0_i and i != cell:
                 neighbor_vec = np.append(neighbor_vec, i)
         return(neighbor_vec.astype(int))
 
 
 class LcpMain:
-    def main(self, dm, dc, sr, ps, ss, sim, sample_num):
+    def main(self, dm, dc, sr, ps, ss, sim, sample_num, max_iter=1.0e5):
         theta = {}
+        count = 0
         for t in range(dc.get_length()):
+            print("t: " + str(t))
             sr.load_new()
             pre_theta = theta
-            while sr.get_new_num() < sample_num:
+            while sr.get_new_num() < sample_num and count <= max_iter:
                 if t == 0:
                     theta = ps.sample_param()
                 else:
                     theta = ss.sample_param(pre_theta)
                 v = sim.conduct(theta)
                 if dc.decide(v, t):
-                    sr.register_new(theta)
+                    sr.register_new(theta, t)
+                    print("num: " + str(sr.get_new_num()))
+                count += 1
+            if count > max_iter:
+                break
             pre_theta = theta
-        return(sr)
+        return(sr, v)
