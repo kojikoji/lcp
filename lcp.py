@@ -5,6 +5,7 @@ import math
 from scipy.ndimage import rotate
 from scipy.spatial.distance import pdist, squareform
 import numba
+import progressbar
 
 
 @numba.jit(nopython=True)
@@ -400,24 +401,27 @@ class Simulator:
 
 
 class LcpMain:
-    def main(self, dm, dc, sr, ps, ss, sim, sample_num, max_iter=1.0e5):
+    def main(self, dm, dc, sr, ps, ss, sim, sample_num, filter_rate=0.25):
         theta = {}
-        count = 0
         for t in range(dc.get_length()):
             print("t: " + str(t))
             sr.load_new()
             pre_theta = theta
-            while sr.get_new_num() < sample_num and count <= max_iter:
+            new_theta_vec = np.array([])
+            error_vec = np.array([])
+            for _ in progressbar.progressbar(range(sample_num)):
                 if t == 0:
                     theta = ps.sample_param()
                 else:
+                    pre_theta = sr.choice()
                     theta = ss.sample_param(pre_theta)
                 v = sim.conduct(theta)
-                if dc.decide(v, t):
-                    sr.register_new(theta, t)
-                    print("num: " + str(sr.get_new_num()))
-                count += 1
-            if count > max_iter:
-                break
-            pre_theta = theta
+                error_vec = np.append(
+                    error_vec, np.mean(norm_mat(dm.v - v, axis=1)))
+                new_theta_vec = np.append(
+                    new_theta_vec, theta)
+            [sr.register_new(theta, t)
+             for theta in
+             new_theta_vec[error_vec < np.quantile(error_vec, filter_rate)]]
+            print("mean error:", np.mean(error_vec))
         return(sr, v)
