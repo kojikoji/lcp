@@ -6,24 +6,25 @@ from scipy.ndimage import rotate
 from scipy.spatial.distance import pdist, squareform
 import numba
 import progressbar
+from joblib import Parallel, delayed
 
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, parallel=False, nogil=False)
 def norm_mat(v_mat, axis=1):
     return(np.sqrt(v_mat[:, 0]**2 + v_mat[:, 1]**2 + v_mat[:, 2]**2))
 
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, parallel=False, nogil=False)
 def norm_vec2(v, axis=1):
     return(np.sqrt(v[0]**2 + v[1]**2))
 
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, parallel=False, nogil=False)
 def norm_vec3(v, axis=1):
     return(np.sqrt(v[0]**2 + v[1]**2 + v[2]**2))
 
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, parallel=False, nogil=False)
 def multivariate_normal_pdf(x, mu, L, detL):
     diff2 = (x - mu)**2
     dLd = np.dot(diff2, L @ diff2)
@@ -32,7 +33,7 @@ def multivariate_normal_pdf(x, mu, L, detL):
     return(prob)
 
 
-#@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def diff_func(v, est_v, pre_v):
     # normalize_pre_v = pre_v/norm_mat(pre_v).reshape((pre_v.shape[0], 1))
     normalize_v = v/norm_mat(v).reshape((v.shape[0], 1))
@@ -410,27 +411,31 @@ class Simulator:
 
 
 class LcpMain:
-    def main(self, dm, dc, sr, ps, ss, sim, sample_num, filter_rate=0.25):
-        theta = {}
+    def main(self, dm, dc, sr, ps, ss, sim, sample_num, filter_rate=0.25, process=2):
         for t in range(dc.get_length()):
             print("t: " + str(t))
             sr.load_new()
-            pre_theta = theta
-            new_theta_vec = np.array([])
-            error_vec = np.array([])
-            for _ in progressbar.progressbar(range(sample_num)):
+
+            def generate_theta_error():
                 if t == 0:
                     theta = ps.sample_param()
                 else:
                     pre_theta = sr.choice()
                     theta = ss.sample_param(pre_theta)
                 v = sim.conduct(theta)
-                error_vec = np.append(
-                    error_vec, diff_func(dm.v, v, dm.pre_v))
-                new_theta_vec = np.append(
-                    new_theta_vec, theta)
+                error = diff_func(dm.v, v, dm.pre_v)
+                return(theta, error, v)
+
+            theta_error_list = Parallel(n_jobs=process, verbose=3)([
+                delayed(generate_theta_error)()
+                for i in range(sample_num)])
+            theta_vec = np.array([
+                theta for theta, error, v in theta_error_list])
+            error_vec = np.array([
+                error for theta, error, v in theta_error_list])
+            v_list = [theta for theta, error, v in theta_error_list]
             [sr.register_new(theta, t)
              for theta in
-             new_theta_vec[error_vec < np.quantile(error_vec, filter_rate)]]
+             theta_vec[error_vec < np.quantile(error_vec, filter_rate)]]
             print("mean error:", np.mean(error_vec))
-        return(sr, v)
+        return(sr, v_list)
