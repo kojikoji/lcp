@@ -32,6 +32,15 @@ def multivariate_normal_pdf(x, mu, L, detL):
     return(prob)
 
 
+#@numba.jit(nopython=True)
+def diff_func(v, est_v, pre_v):
+    # normalize_pre_v = pre_v/norm_mat(pre_v).reshape((pre_v.shape[0], 1))
+    normalize_v = v/norm_mat(v).reshape((v.shape[0], 1))
+    normalize_est_v = est_v/norm_mat(est_v).reshape((est_v.shape[0], 1))
+    diff = np.mean(norm_mat(normalize_est_v - normalize_v))
+    return(diff)
+
+
 class DataManager:
     """
     This class manage the data.
@@ -417,7 +426,7 @@ class LcpMain:
                     theta = ss.sample_param(pre_theta)
                 v = sim.conduct(theta)
                 error_vec = np.append(
-                    error_vec, np.mean(norm_mat(dm.v - v, axis=1)))
+                    error_vec, diff_func(dm.v, v, dm.pre_v))
                 new_theta_vec = np.append(
                     new_theta_vec, theta)
             [sr.register_new(theta, t)
